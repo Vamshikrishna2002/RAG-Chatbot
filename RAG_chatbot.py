@@ -93,7 +93,7 @@ if uploaded_file:
 
 
     # Initialize chat history as a list of dicts instead of a string
-    if "chat_history" not in st.session_state:
+    if "chat_history" not in st.session_state or not isinstance(st.session_state.chat_history, list):
         st.session_state.chat_history = []
     
     # User input
