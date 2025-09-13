@@ -105,14 +105,17 @@ if uploaded_file:
     
         # Append new interaction to chat history
         st.session_state.chat_history.append({"user": question, "bot": answer})
-    
-    # Display the full conversation
+
     for chat in st.session_state.chat_history:
-        with st.chat_message("user"):
-            st.write(chat["user"])
-        with st.chat_message("assistant"):
-            st.write(chat["bot"])
-            
+        user_msg = chat.get("user")  # safe access
+        bot_msg = chat.get("bot")
+        if user_msg:
+            with st.chat_message("user"):
+                st.write(user_msg)
+        if bot_msg:
+            with st.chat_message("assistant"):
+                st.write(bot_msg)
+  
 else:
     st.info("👆 Upload a PDF to get started.")
 
