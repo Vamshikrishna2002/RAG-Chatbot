@@ -91,25 +91,28 @@ if uploaded_file:
     chunks = chunk_text(text)
     index, embeddings = build_faiss_index(chunks)
 
-    # Initialize chat history
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = ""
 
+    # Initialize chat history as a list of dicts instead of a string
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    
     # User input
     question = st.chat_input("Ask a question about the PDF...")
     if question:
         results = search_index(question, index, chunks)
         context = "\n".join(results)
         answer = ask_gemini(question, context, st.session_state.chat_history)
-
-        # Update history
-        st.session_state.chat_history += f"\nUser: {question}\nBot: {answer}"
-
-        # Show conversation
+    
+        # Append new interaction to chat history
+        st.session_state.chat_history.append({"user": question, "bot": answer})
+    
+    # Display the full conversation
+    for chat in st.session_state.chat_history:
         with st.chat_message("user"):
-            st.write(question)
+            st.write(chat["user"])
         with st.chat_message("assistant"):
-            st.write(answer)
+            st.write(chat["bot"])
+            
 else:
     st.info("👆 Upload a PDF to get started.")
 
