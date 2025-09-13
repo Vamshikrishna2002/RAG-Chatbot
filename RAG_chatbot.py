@@ -3,13 +3,15 @@ import streamlit as st
 import pdfplumber
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import faiss
+import torch
 from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 
 # --------------------------
 # Config
 # --------------------------
-EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+torch_device="cpu"
+EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2", device=torch_device)
 EMBED_DIM = EMBED_MODEL.get_sentence_embedding_dimension()
 api_key = os.getenv("GEMINI_API_KEY")  # load from env
 if not api_key:
