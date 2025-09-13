@@ -1,6 +1,4 @@
 streamlit
-pdfplumber
-langchain
-faiss-cpu
-sentence-transformers
+pypdf
 google-generativeai
+faiss-cpu
