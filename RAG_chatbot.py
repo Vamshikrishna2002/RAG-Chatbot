@@ -19,8 +19,7 @@ def load_pdf(file):
         text += page.extract_text() or ""
     return text
 
-def chunk_text(text, chunk_size=500, overlap=50):
-    """Split text into overlapping chunks"""
+def chunk_text(text, chunk_size=300, overlap=50):
     chunks = []
     start = 0
     while start < len(text):
@@ -29,17 +28,24 @@ def chunk_text(text, chunk_size=500, overlap=50):
         start += chunk_size - overlap
     return chunks
 
+import time
+
 def embed_texts(texts):
-    """Get embeddings from Gemini API"""
     embeddings = []
     for txt in texts:
-        res = genai.embed_content(
-            model="gemini-embedding-001",
-            content=txt
-        )
-        embeddings.append(res["embedding"])
+        while True:
+            try:
+                res = genai.embed_content(
+                    model="gemini-embedding-001",
+                    content=txt
+                )
+                embeddings.append(res["embedding"])
+                break
+            except Exception as e:
+                print("API rate limit / resource exhausted, retrying...")
+                time.sleep(1)  # wait 1s before retry
     return np.array(embeddings).astype("float32")
-
+    
 def build_faiss_index(chunks):
     """Build FAISS index for fast similarity search"""
     embeddings = embed_texts(chunks)
