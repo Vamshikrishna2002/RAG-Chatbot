@@ -1,114 +1,113 @@
 import os
 import streamlit as st
-import pdfplumber
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-import faiss
-import torch
-from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
+from PyPDF2 import PdfReader
+import faiss
+import numpy as np
+
+# 🔑 Load Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # --------------------------
-# Config
+# Helper functions
 # --------------------------
-torch_device="cpu"
-EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2", device=torch_device)
-EMBED_DIM = EMBED_MODEL.get_sentence_embedding_dimension()
-api_key = os.getenv("GEMINI_API_KEY")  # load from env
-if not api_key:
-    st.error("❌ Please set your GEMINI_API_KEY environment variable.")
-else:
-    genai.configure(api_key=api_key)
-
-
-# --------------------------
-# Functions
-# --------------------------
-def extract_text_from_pdf(file):
+def load_pdf(file):
+    """Extract text from PDF file"""
+    pdf = PdfReader(file)
     text = ""
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text() or ""
+    for page in pdf.pages:
+        text += page.extract_text() or ""
     return text
 
-def make_chunks(text):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    return splitter.split_text(text)
+def chunk_text(text, chunk_size=500, overlap=50):
+    """Split text into overlapping chunks"""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = min(start + chunk_size, len(text))
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
+    return chunks
 
 def embed_texts(texts):
-    return EMBED_MODEL.encode(texts, convert_to_numpy=True, normalize_embeddings=True).astype("float32")
+    """Get embeddings from Gemini API"""
+    embeddings = []
+    for txt in texts:
+        res = genai.embed_content(
+            model="gemini-embedding-001",
+            content=txt
+        )
+        embeddings.append(res["embedding"])
+    return np.array(embeddings).astype("float32")
 
-def build_index(vectors):
-    index = faiss.IndexFlatIP(EMBED_DIM)
-    index.add(vectors)
-    return index
+def build_faiss_index(chunks):
+    """Build FAISS index for fast similarity search"""
+    embeddings = embed_texts(chunks)
+    dim = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dim)
+    index.add(embeddings)
+    return index, embeddings
 
-def retrieve(query, index, chunks, k=3):
-    qvec = embed_texts([query])
-    D, I = index.search(qvec, k)
+def search_index(query, index, chunks, k=3):
+    """Search FAISS index for relevant chunks"""
+    q_emb = embed_texts([query])
+    D, I = index.search(q_emb, k)
     return [chunks[i] for i in I[0]]
 
-def ask_gemini(question, chunks, chat_history):
-    context = "\n\n".join(chunks)
-    history_text = "\n".join([f"Q: {q}\nA: {a}" for q, a in chat_history])
+def ask_gemini(question, context, history):
+    """Ask Gemini with context and chat history"""
+    prompt = f"""You are a helpful assistant. 
+Use the following context from the PDF to answer the user’s question.
 
-    prompt = f"""You are a helpful PDF assistant.
-Here is the conversation so far:
-{history_text}
-
-Relevant PDF context:
+Context:
 {context}
 
-Now answer the new question: {question}"""
+Chat history:
+{history}
 
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    return model.generate_content(prompt).text
+Question: {question}
+Answer:"""
+
+    response = genai.GenerativeModel("gemini-2.0-flash").generate_content(prompt)
+    return response.text
+
 # --------------------------
 # Streamlit UI
 # --------------------------
 st.set_page_config(page_title="📄 PDF RAG Chatbot", layout="wide")
-st.title("📄 PDF RAG Chatbot (Gemini)")
+st.title("📄 PDF RAG Chatbot with Gemini")
 
-# Initialize session state
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "index" not in st.session_state:
-    st.session_state.index = None
+# Sidebar for PDF upload
+uploaded_file = st.sidebar.file_uploader("Upload your PDF", type="pdf")
 
-# File uploader
-uploaded_file = st.file_uploader("Upload a PDF", type="pdf")
+if uploaded_file:
+    text = load_pdf(uploaded_file)
+    chunks = chunk_text(text)
+    index, embeddings = build_faiss_index(chunks)
 
-if uploaded_file and st.session_state.index is None:
-    st.success("✅ PDF uploaded and processed!")
-    text = extract_text_from_pdf(uploaded_file)
-    chunks = make_chunks(text)
-    vectors = embed_texts(chunks)
-    index = build_index(vectors)
-    st.session_state.chunks = chunks
-    st.session_state.index = index
+    # Initialize chat history
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = ""
 
-# Display chat history in ChatGPT style
-for q, a in st.session_state.chat_history:
-    with st.chat_message("user"):
-        st.markdown(q)
-    with st.chat_message("assistant"):
-        st.markdown(a)
+    # User input
+    question = st.chat_input("Ask a question about the PDF...")
+    if question:
+        results = search_index(question, index, chunks)
+        context = "\n".join(results)
+        answer = ask_gemini(question, context, st.session_state.chat_history)
 
-# Chat input at the bottom
-if st.session_state.index is not None:
-    if question := st.chat_input("Ask something about your PDF..."):
-        # Show user message
+        # Update history
+        st.session_state.chat_history += f"\nUser: {question}\nBot: {answer}"
+
+        # Show conversation
         with st.chat_message("user"):
-            st.markdown(question)
-
-        # Retrieve relevant chunks
-        results = retrieve(question, st.session_state.index, st.session_state.chunks)
-
-        # Get answer from Gemini
-        answer = ask_gemini(question, results, st.session_state.chat_history)
-
-        # Save to history
-        st.session_state.chat_history.append((question, answer))
-
-        # Show bot response
+            st.write(question)
         with st.chat_message("assistant"):
-            st.markdown(answer)
+            st.write(answer)
+else:
+    st.info("👆 Upload a PDF to get started.")
+
+
+
+
+
